@@ -570,6 +570,8 @@ async def update_master(
 
 # ---------------- Расписание мастеров ----------------
 
+# ---------------- Расписание мастеров ----------------
+
 async def create_schedule(
     master_id: int,
     weekday: int,
@@ -604,6 +606,39 @@ async def create_schedule(
         await db.commit()
 
 
+async def update_schedule(
+    master_id: int,
+    weekday: int,
+    start_time: str,
+    end_time: str,
+    break_start: str,
+    break_end: str
+):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            """
+            UPDATE master_schedule
+            SET
+                start_time = ?,
+                end_time = ?,
+                break_start = ?,
+                break_end = ?
+            WHERE master_id = ?
+            AND weekday = ?
+            """,
+            (
+                start_time,
+                end_time,
+                break_start,
+                break_end,
+                master_id,
+                weekday
+            )
+        )
+
+        await db.commit()
+
+
 async def get_schedule(master_id: int):
     async with aiosqlite.connect(DB_NAME) as db:
         cursor = await db.execute(
@@ -624,6 +659,7 @@ async def get_schedule(master_id: int):
         return await cursor.fetchall()
 
 
+
 async def delete_schedule(master_id: int):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute(
@@ -637,7 +673,24 @@ async def delete_schedule(master_id: int):
         await db.commit()
 
 
+async def delete_schedule_day(
+    master_id: int,
+    weekday: int
+):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            """
+            DELETE FROM master_schedule
+            WHERE master_id = ?
+            AND weekday = ?
+            """,
+            (
+                master_id,
+                weekday
+            )
+        )
 
+        await db.commit()
 
 
 async def get_schedule_for_day(
@@ -664,3 +717,7 @@ async def get_schedule_for_day(
         )
 
         return await cursor.fetchone()
+
+
+
+

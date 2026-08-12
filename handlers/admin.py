@@ -2,7 +2,6 @@ from math import ceil
 from datetime import datetime
 
 from states.admin_schedule_state import AdminScheduleState
-from database.db import service_has_active_appointments
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -20,17 +19,28 @@ from database.db import (
     get_appointments_by_status,
     get_appointments_count_by_status,
     get_stats,
+
     create_service,
     delete_service,
     get_services_admin,
+
     create_master,
     delete_master,
     get_masters_admin,
     master_has_active_appointments,
+
     update_service,
     update_master,
-    create_schedule
+
+    create_schedule,
+    update_schedule,
+    get_schedule,
+    get_schedule_for_day,
+    delete_schedule_day,
+
+    service_has_active_appointments,
 )
+
 
 from keyboards.inline import (
     get_admin_keyboard,
@@ -43,7 +53,9 @@ from keyboards.inline import (
     get_delete_masters_keyboard,
     get_edit_services_keyboard,
     get_edit_masters_keyboard,
-    get_schedule_master_keyboard
+    get_schedule_master_keyboard,
+    get_schedule_days_keyboard,
+    get_schedule_edit_keyboard
 )
 
 
@@ -359,55 +371,6 @@ async def admin_masters(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(F.data == "admin_master_schedule")
-async def admin_master_schedule(
-    callback: CallbackQuery
-):
-
-    masters = await get_masters_admin()
-
-    await callback.message.edit_text(
-        "Оберіть майстра:",
-        reply_markup=get_schedule_master_keyboard(
-            masters
-        )
-    )
-
-    await callback.answer()
-
-
-@router.callback_query(
-    F.data.startswith("schedule_master_")
-)
-async def choose_schedule_master(
-    callback: CallbackQuery,
-    state: FSMContext
-):
-
-    master_id = int(
-        callback.data.split("_")[2]
-    )
-
-    await state.update_data(
-        master_id=master_id
-    )
-
-    await state.set_state(
-        AdminScheduleState.waiting_weekday
-    )
-
-    await callback.message.edit_text(
-        "Введіть день тижня.\n\n"
-        "0 - Понеділок\n"
-        "1 - Вівторок\n"
-        "2 - Середа\n"
-        "3 - Четвер\n"
-        "4 - П'ятниця\n"
-        "5 - Субота\n"
-        "6 - Неділя"
-    )
-
-    await callback.answer()
 
 
 @router.callback_query(F.data == "admin_master_add")
@@ -868,45 +831,217 @@ async def edit_master_name(
 
 
 # ==========================
+# ==========================
 # Розклад
 # ==========================
 
-@router.message(
-    AdminScheduleState.waiting_weekday
+@router.callback_query(F.data == "admin_master_schedule")
+async def admin_master_schedule(
+    callback: CallbackQuery
+):
+    masters = await get_masters_admin()
+
+    await callback.message.edit_text(
+        "Оберіть майстра:",
+        reply_markup=get_schedule_master_keyboard(
+            masters
+        )
+    )
+
+    await callback.answer()
+
+
+@router.callback_query(
+    F.data.startswith("schedule_master_")
 )
-async def schedule_weekday(
-    message: Message,
+async def choose_schedule_master(
+    callback: CallbackQuery,
     state: FSMContext
 ):
-
-    if message.text not in [
-        "0",
-        "1",
-        "2",
-        "3",
-        "4",
-        "5",
-        "6"
-    ]:
-
-        await message.answer(
-            "Введіть число від 0 до 6."
-        )
-
-        return
+    master_id = int(
+        callback.data.split("_")[2]
+    )
 
     await state.update_data(
-        weekday=int(message.text)
+        master_id=master_id
     )
+
+    schedule = await get_schedule(
+        master_id
+    )
+
+    if schedule:
+        await callback.message.edit_text(
+            "📅 Оберіть день для редагування:",
+            reply_markup=get_schedule_edit_keyboard(
+                schedule
+            )
+        )
+    else:
+        await callback.message.edit_text(
+            "📅 Розклад ще не налаштований.\n\n"
+            "Оберіть день для додавання:",
+            reply_markup=get_schedule_days_keyboard()
+        )
+
+    await callback.answer()
+
+
+@router.callback_query(
+    F.data == "schedule_add_day"
+)
+async def schedule_add_day(
+    callback: CallbackQuery,
+    state: FSMContext
+):
+    await callback.message.edit_text(
+        "📅 Оберіть день:",
+        reply_markup=get_schedule_days_keyboard()
+    )
+
+    await callback.answer()
+
+
+@router.callback_query(
+    F.data.startswith("edit_schedule_")
+)
+async def edit_schedule(
+    callback: CallbackQuery,
+    state: FSMContext
+):
+    weekday = int(
+        callback.data.split("_")[2]
+    )
+
+    data = await state.get_data()
+
+    await state.update_data(
+        weekday=weekday,
+        mode="edit"
+    )
+
+    schedule = await get_schedule_for_day(
+        data["master_id"],
+        weekday
+    )
+
+    if schedule:
+        await state.update_data(
+            old_start_time=schedule[0],
+            old_end_time=schedule[1],
+            old_break_start=schedule[2],
+            old_break_end=schedule[3]
+        )
 
     await state.set_state(
         AdminScheduleState.waiting_start
     )
 
-    await message.answer(
-        "Введіть початок робочого дня.\n\n"
+    await callback.message.edit_text(
+        "Введіть новий початок робочого дня.\n\n"
         "Наприклад:\n10:00"
     )
+
+    await callback.answer()
+
+@router.callback_query(
+    F.data.startswith("delete_schedule_day_")
+)
+async def delete_schedule_day_handler(
+    callback: CallbackQuery,
+    state: FSMContext
+):
+    weekday = int(
+        callback.data.split("_")[3]
+    )
+
+    data = await state.get_data()
+
+    master_id = data.get("master_id")
+
+    if not master_id:
+        await callback.answer(
+            "Помилка: майстра не знайдено.",
+            show_alert=True
+        )
+        return
+
+    await delete_schedule_day(
+        master_id=master_id,
+        weekday=weekday
+    )
+
+    schedule = await get_schedule(
+        master_id
+    )
+
+    if schedule:
+        await callback.message.edit_text(
+            "✅ День видалено.\n\n"
+            "📅 Оберіть день для редагування:",
+            reply_markup=get_schedule_edit_keyboard(
+                schedule
+            )
+        )
+    else:
+        await callback.message.edit_text(
+            "📅 Розклад ще не налаштований.\n\n"
+            "Оберіть день для додавання:",
+            reply_markup=get_schedule_days_keyboard()
+        )
+
+    await callback.answer()
+
+@router.callback_query(
+    F.data.startswith("schedule_day_")
+)
+async def add_schedule_day(
+    callback: CallbackQuery,
+    state: FSMContext
+):
+    weekday = int(
+        callback.data.split("_")[2]
+    )
+
+    data = await state.get_data()
+
+    existing_schedule = await get_schedule_for_day(
+        data["master_id"],
+        weekday
+    )
+
+    if existing_schedule:
+        await state.update_data(
+            weekday=weekday,
+            mode="edit"
+        )
+
+        await state.set_state(
+            AdminScheduleState.waiting_start
+        )
+
+        await callback.message.edit_text(
+            "⚠️ Для цього дня розклад уже існує.\n\n"
+            "Введіть новий початок робочого дня.\n\n"
+            "Наприклад:\n10:00"
+        )
+
+    else:
+        await state.update_data(
+            weekday=weekday,
+            mode="create"
+        )
+
+        await state.set_state(
+            AdminScheduleState.waiting_start
+        )
+
+        await callback.message.edit_text(
+            "Введіть початок робочого дня.\n\n"
+            "Наприклад:\n10:00"
+        )
+
+    await callback.answer()
 
 
 @router.message(
@@ -916,9 +1051,7 @@ async def schedule_start(
     message: Message,
     state: FSMContext
 ):
-
     if not is_valid_time(message.text):
-
         await message.answer(
             "Введіть час у форматі HH:MM\n\n"
             "Наприклад: 10:00"
@@ -947,9 +1080,7 @@ async def schedule_end(
     message: Message,
     state: FSMContext
 ):
-
     if not is_valid_time(message.text):
-
         await message.answer(
             "Введіть час у форматі HH:MM\n\n"
             "Наприклад: 18:00"
@@ -978,9 +1109,7 @@ async def schedule_break_start(
     message: Message,
     state: FSMContext
 ):
-
     if not is_valid_time(message.text):
-
         await message.answer(
             "Введіть час у форматі HH:MM\n\n"
             "Наприклад: 13:00"
@@ -998,7 +1127,7 @@ async def schedule_break_start(
 
     await message.answer(
         "Введіть кінець обіду.\n\n"
-        "Наприклад:\n14:00"
+        "Наприклад: 14:00"
     )
 
 
@@ -1009,9 +1138,7 @@ async def schedule_break_end(
     message: Message,
     state: FSMContext
 ):
-
     if not is_valid_time(message.text):
-
         await message.answer(
             "Введіть час у форматі HH:MM\n\n"
             "Наприклад: 14:00"
@@ -1042,7 +1169,6 @@ async def schedule_break_end(
     )
 
     if end <= start:
-
         await message.answer(
             "❌ Кінець робочого дня має бути "
             "пізніше початку."
@@ -1051,7 +1177,6 @@ async def schedule_break_end(
         return
 
     if break_start >= break_end:
-
         await message.answer(
             "❌ Кінець обіду має бути "
             "пізніше початку."
@@ -1060,7 +1185,6 @@ async def schedule_break_end(
         return
 
     if break_start < start or break_end > end:
-
         await message.answer(
             "❌ Обід має бути в межах "
             "робочого часу."
@@ -1068,17 +1192,36 @@ async def schedule_break_end(
 
         return
 
-    await create_schedule(
-        master_id=data["master_id"],
-        weekday=data["weekday"],
-        start_time=data["start_time"],
-        end_time=data["end_time"],
-        break_start=data["break_start"],
-        break_end=message.text
-    )
+    if data.get("mode") == "edit":
 
-    await state.clear()
+        await update_schedule(
+            master_id=data["master_id"],
+            weekday=data["weekday"],
+            start_time=data["start_time"],
+            end_time=data["end_time"],
+            break_start=data["break_start"],
+            break_end=message.text
+        )
 
-    await message.answer(
-        "✅ Розклад успішно збережено."
-    )
+        await state.clear()
+
+        await message.answer(
+            "✅ Розклад успішно оновлено."
+        )
+
+    else:
+
+        await create_schedule(
+            master_id=data["master_id"],
+            weekday=data["weekday"],
+            start_time=data["start_time"],
+            end_time=data["end_time"],
+            break_start=data["break_start"],
+            break_end=message.text
+        )
+
+        await state.clear()
+
+        await message.answer(
+            "✅ Розклад успішно збережено."
+        )

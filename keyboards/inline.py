@@ -551,6 +551,125 @@ def get_schedule_master_keyboard(masters):
     )
 
 
+def get_schedule_days_keyboard():
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                text="Понеділок",
+                callback_data="schedule_day_0"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="Вівторок",
+                callback_data="schedule_day_1"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="Середа",
+                callback_data="schedule_day_2"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="Четвер",
+                callback_data="schedule_day_3"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="П'ятниця",
+                callback_data="schedule_day_4"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="Субота",
+                callback_data="schedule_day_5"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="Неділя",
+                callback_data="schedule_day_6"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="🔙 Назад",
+                callback_data="admin_masters"
+            )
+        ]
+    ]
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=keyboard
+    )
+
+
+def get_schedule_edit_keyboard(schedule):
+    keyboard = []
+
+    weekdays = {
+        0: "Понеділок",
+        1: "Вівторок",
+        2: "Середа",
+        3: "Четвер",
+        4: "П'ятниця",
+        5: "Субота",
+        6: "Неділя"
+    }
+
+    for item in schedule:
+        weekday = item[0]
+        start_time = item[1]
+        end_time = item[2]
+
+        # Редагування
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text=(
+                        f"✏️ {weekdays[weekday]} "
+                        f"{start_time}–{end_time}"
+                    ),
+                    callback_data=f"edit_schedule_{weekday}"
+                )
+            ]
+        )
+
+        # Видалення
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text=f"🗑 Видалити {weekdays[weekday]}",
+                    callback_data=f"delete_schedule_day_{weekday}"
+                )
+            ]
+        )
+
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                text="➕ Додати день",
+                callback_data="schedule_add_day"
+            )
+        ]
+    )
+
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                text="🔙 Назад",
+                callback_data="admin_masters"
+            )
+        ]
+    )
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=keyboard
+    )
 def get_my_appointments_keyboard(appointments):
 
     keyboard = []
