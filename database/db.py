@@ -1,5 +1,5 @@
 import aiosqlite
-
+from datetime import datetime, timedelta
 DB_NAME = "booking.db"
 
 
@@ -165,6 +165,102 @@ async def add_appointment(
     time: str
 ):
     async with aiosqlite.connect(DB_NAME) as db:
+
+        # ==========================================
+        # Получаем длительность новой услуги
+        # ==========================================
+
+        cursor = await db.execute(
+            """
+            SELECT duration
+            FROM services
+            WHERE id = ?
+            """,
+            (service_id,)
+        )
+
+        service = await cursor.fetchone()
+
+        if service is None:
+            raise ValueError("Послугу не знайдено.")
+
+        new_duration = service[0]
+
+        # ==========================================
+        # Получаем все активные записи мастера
+        # ==========================================
+
+        cursor = await db.execute(
+            """
+            SELECT
+                time,
+                service_id
+            FROM appointments
+            WHERE master_id = ?
+            AND date = ?
+            AND status = 'active'
+            """,
+            (
+                master_id,
+                date
+            )
+        )
+
+        appointments = await cursor.fetchall()
+
+        # ==========================================
+        # Проверяем пересечение времени
+        # ==========================================
+
+        new_start = datetime.strptime(
+            time,
+            "%H:%M"
+        )
+
+        new_end = new_start + timedelta(
+            minutes=new_duration
+        )
+
+        for appointment_time, appointment_service_id in appointments:
+
+            cursor = await db.execute(
+                """
+                SELECT duration
+                FROM services
+                WHERE id = ?
+                """,
+                (appointment_service_id,)
+            )
+
+            service_data = await cursor.fetchone()
+
+            if service_data is None:
+                continue
+
+            old_duration = service_data[0]
+
+            old_start = datetime.strptime(
+                appointment_time,
+                "%H:%M"
+            )
+
+            old_end = old_start + timedelta(
+                minutes=old_duration
+            )
+
+            # Пересечение интервалов
+            if (
+                new_start < old_end
+                and new_end > old_start
+            ):
+                raise ValueError(
+                    "Цей час уже зайнятий."
+                )
+
+        # ==========================================
+        # Создаём запись
+        # ==========================================
+
         await db.execute(
             """
             INSERT INTO appointments(
@@ -186,6 +282,7 @@ async def add_appointment(
                 "active"
             )
         )
+
         await db.commit()
 
 
@@ -240,7 +337,59 @@ async def get_busy_times(master_id, date):
         return await cursor.fetchall()
 
 
+async def is_time_available(
+    master_id: int,
+    date: str,
+    start_time: str,
+    duration: int
+):
+    async with aiosqlite.connect(DB_NAME) as db:
 
+        cursor = await db.execute(
+            """
+            SELECT
+                appointments.time,
+                services.duration
+            FROM appointments
+            JOIN services
+                ON appointments.service_id = services.id
+            WHERE appointments.master_id = ?
+            AND appointments.date = ?
+            AND appointments.status = 'active'
+            """,
+            (
+                master_id,
+                date
+            )
+        )
+
+        busy_times = await cursor.fetchall()
+
+    new_start = datetime.strptime(
+        start_time,
+        "%H:%M"
+    )
+
+    new_end = new_start + timedelta(
+        minutes=duration
+    )
+
+    for busy_time, busy_duration in busy_times:
+
+        busy_start = datetime.strptime(
+            busy_time,
+            "%H:%M"
+        )
+
+        busy_end = busy_start + timedelta(
+            minutes=busy_duration
+        )
+
+        # Проверка пересечения интервалов
+        if new_start < busy_end and new_end > busy_start:
+            return False
+
+    return True
 
 async def get_appointment_by_id(appointment_id):
     async with aiosqlite.connect(DB_NAME) as db:

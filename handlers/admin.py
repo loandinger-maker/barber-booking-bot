@@ -61,6 +61,22 @@ from keyboards.inline import (
 
 router = Router()
 
+class AdminCallbackMiddleware:
+    async def __call__(self, handler, event, data):
+        if str(event.from_user.id) != str(ADMIN_ID):
+            await event.answer(
+                "⛔ У вас немає доступу до адмін-панелі.",
+                show_alert=True
+            )
+            return
+
+        return await handler(event, data)
+
+
+router.callback_query.outer_middleware(
+    AdminCallbackMiddleware()
+)
+
 
 def is_valid_time(value: str) -> bool:
     try:

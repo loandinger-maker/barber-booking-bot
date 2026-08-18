@@ -15,6 +15,7 @@ from database.db import (
     get_busy_times,
     cancel_appointment,
     get_appointment_by_id,
+    is_time_available,
 )
 
 from keyboards.inline import (
@@ -254,16 +255,54 @@ async def confirm_booking(
     state: FSMContext,
     bot: Bot
 ):
-
     data = await state.get_data()
 
-    await add_appointment(
-        callback.from_user.id,
-        data["service_id"],
-        data["master_id"],
-        data["date"],
-        data["time"]
+    # ==========================================
+    # Проверка, что выбранное время ещё не прошло
+    # ==========================================
+
+    selected_datetime = datetime.strptime(
+        f"{data['date']} {data['time']}",
+        "%Y-%m-%d %H:%M"
     )
+
+    now = datetime.now()
+
+    if selected_datetime <= now:
+
+        await callback.answer(
+            "❌ Це час уже минув. Оберіть інший час.",
+            show_alert=True
+        )
+
+        return
+
+    # ==========================================
+    # Создание записи
+    # ==========================================
+
+    try:
+
+        await add_appointment(
+            callback.from_user.id,
+            data["service_id"],
+            data["master_id"],
+            data["date"],
+            data["time"]
+        )
+
+    except ValueError as e:
+
+        await callback.answer(
+            str(e),
+            show_alert=True
+        )
+
+        return
+
+    # ==========================================
+    # Получаем информацию о записи
+    # ==========================================
 
     service = await get_service_by_id(
         data["service_id"]
@@ -273,7 +312,20 @@ async def confirm_booking(
         data["master_id"]
     )
 
+    if service is None or master is None:
+
+        await callback.answer(
+            "❌ Помилка: послугу або майстра не знайдено.",
+            show_alert=True
+        )
+
+        return
+
     username = callback.from_user.username
+
+    # ==========================================
+    # Уведомление администратора
+    # ==========================================
 
     await bot.send_message(
         ADMIN_ID,
@@ -288,6 +340,10 @@ async def confirm_booking(
         f"📅 Дата: {data['date']}\n"
         f"🕒 Час: {data['time']}"
     )
+
+    # ==========================================
+    # Успешное создание
+    # ==========================================
 
     await callback.message.edit_text(
         "✅ Запис успішно створено!"
@@ -325,7 +381,7 @@ async def cancel_booking(
 # ============================================================
 
 @router.callback_query(
-    F.data.startswith("cancel_")
+    F.data.regexp(r"^cancel_\d+$")
 )
 async def cancel_appointment_handler(
     callback: CallbackQuery,
